@@ -1,0 +1,18 @@
+# 本地运行与个人数据
+library/
+__pycache__/
+*.pyc
+
+# 字体（微软版权字体，不随仓库分发，自行获取）
+fonts/*.ttf
+fonts/*.ttc
+fonts/*.otf
+
+# 临时产物
+*.comp.pdf
+/tmp/
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

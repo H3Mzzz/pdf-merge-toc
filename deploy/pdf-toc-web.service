@@ -1,0 +1,23 @@
+[Unit]
+Description=PDF Merge + TOC Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pdf-merge-toc
+ExecStart=/usr/bin/python3 /opt/pdf-merge-toc/app.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# ===== 按需修改 =====
+# 监听地址：只绑可信网络（Tailscale 网卡 IP / 内网 IP / 127.0.0.1），切勿 0.0.0.0
+Environment="PDF_TOC_BIND_IP=127.0.0.1"
+# Environment="PDF_TOC_PORT=8788"
+# Environment="PDF_TOC_LIB_DIR=/opt/pdf-merge-toc/library"
+# Environment="PDF_TOC_JOBS_DIR=/tmp/pdf_toc_jobs"
+# Environment="PDF_TOC_FONT_DIR=/opt/pdf-merge-toc/fonts"
+
+[Install]
+WantedBy=multi-user.target

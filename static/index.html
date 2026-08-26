@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF 合并 + 目录生成</title>
+<style>
+  :root {
+    --primary: #2563eb; --primary-dark: #1d4ed8; --bg: #f2f4f8; --card: #fff;
+    --border: #e2e6ee; --text: #1f2937; --muted: #6b7280;
+    --danger: #dc2626; --ok: #16a34a; --warn: #b45309;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: var(--bg); color: var(--text); padding: 24px 16px 60px; line-height: 1.55; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 20px; }
+  header h1 { font-size: 24px; }
+  header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(16,24,40,.05); }
+  .card h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .sub { font-weight: 400; font-size: 12px; color: var(--muted); }
+  .step { display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--primary); color: #fff; font-size: 13px; align-items: center; justify-content: center; flex: none; }
+  .drop { border: 2px dashed #c3cad9; border-radius: 10px; padding: 22px 16px; text-align: center;
+    color: var(--muted); cursor: pointer; transition: .15s; }
+  .drop:hover, .drop.over { border-color: var(--primary); background: #f0f5ff; color: var(--primary); }
+  ul.flist { list-style: none; margin-top: 12px; }
+  ul.flist li { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: #fafbfd; }
+  ul.flist li .idx { color: var(--muted); font-size: 12px; width: 18px; text-align: right; flex: none; }
+  ul.flist li .fname { flex: 1; word-break: break-all; font-size: 14px; }
+  ul.flist li .meta { color: var(--muted); font-size: 12px; white-space: nowrap; flex: none; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; flex: none; }
+  .tag.lib { background: #ede9fe; color: #6d28d9; }
+  .tag.up { background: #dbeafe; color: #1d4ed8; }
+  .tag.word { background: #fef3c7; color: var(--warn); }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid var(--border);
+    border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; color: var(--text); transition: .12s;
+    text-decoration: none; }
+  .btn:hover { border-color: var(--primary); color: var(--primary); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-size: 15px; padding: 10px 26px; }
+  .btn.primary:hover { background: var(--primary-dark); }
+  .btn.primary:disabled { background: #a5b8e8; border-color: #a5b8e8; cursor: not-allowed; }
+  .btn.sm { padding: 4px 10px; font-size: 12px; }
+  .icon-btn { border: 1px solid var(--border); background: #fff; border-radius: 6px; width: 26px; height: 26px;
+    cursor: pointer; font-size: 12px; color: var(--muted); flex: none; }
+  .icon-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+  label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+  .tocrow { display: grid; grid-template-columns: 62px 1fr 108px 158px 84px; gap: 8px; align-items: center; padding: 6px 0; }
+  .tocrow.head { font-size: 12px; color: var(--muted); padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .tocrow input, .tocrow select { width: 100%; padding: 7px 9px; border: 1px solid var(--border);
+    border-radius: 7px; font-size: 13px; background: #fff; color: var(--text); }
+  .tocrow input:focus, .tocrow select:focus { outline: none; border-color: var(--primary); }
+  .rowbtns { display: flex; gap: 6px; justify-content: flex-end; }
+  .opts { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+  .opts label { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .opts input[type=text] { padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 13px; width: 180px; }
+  .radio-group { display: flex; gap: 14px; flex-wrap: wrap; }
+  .preview { background: #fafbfd; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; min-height: 40px; }
+  .preview .lv1 { margin: 2px 0; } .preview .lv2 { margin: 2px 0 2px 26px; } .preview .lv3 { margin: 2px 0 2px 52px; }
+  .preview .pg { color: var(--muted); }
+  .preview .dot { border-bottom: 1px dotted #b7bfce; flex: 1; margin: 0 8px; align-self: flex-end; height: 1em; }
+  .pl { display: flex; align-items: baseline; }
+  .banner { border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 12px; display: none; }
+  .banner.err { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; display: block; }
+  .banner.ok { background: #f0fdf4; color: var(--ok); border: 1px solid #bbf7d0; display: block; }
+  .banner.info { background: #eff6ff; color: var(--primary-dark); border: 1px solid #bfdbfe; display: block; }
+  .notice { background: #fffbeb; border: 1px solid #fde68a; color: var(--warn); border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; margin-top: 10px; }
+  #resultCard { display: none; }
+  iframe { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 8px; margin-top: 12px; background: #fff; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent;
+    border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .libgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 10px; }
+  .libitem { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: #fafbfd; }
+  .libitem .top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .libitem .nm { flex: 1; font-size: 13px; font-weight: 500; word-break: break-all; }
+  .libitem .info { color: var(--muted); font-size: 11px; margin-bottom: 7px; }
+  .libitem .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .collapse-hd { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+  .collapse-hd .arrow { transition: transform .15s; font-size: 11px; color: var(--muted); }
+  .collapse-hd.closed .arrow { transform: rotate(-90deg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PDF 合并 + 目录生成</h1>
+    <p>PDF / Word / 图片 合并成一个文档，自动生成可点击跳转的目录页</p>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <!-- 常用材料库 -->
+  <div class="card">
+    <h2 class="collapse-hd" id="libHead"><span class="arrow">▼</span><span class="step">★</span>常用材料库
+      <span class="sub" id="libCount"></span></h2>
+    <div id="libBody">
+      <div class="toolbar">
+        <button class="btn" id="btnLibUpload">＋ 上传到材料库</button>
+        <span class="muted">上传一次永久保存，之后点「加入合并」即可，无需重复上传</span>
+      </div>
+      <input type="file" id="libInput" multiple accept=".pdf,.docx,.doc,.odt,.rtf,.png,.jpg,.jpeg" style="display:none">
+      <div class="libgrid" id="libGrid"></div>
+    </div>
+  </div>
+
+  <!-- 合并列表 -->
+  <div class="card">
+    <h2><span class="step">1</span>合并列表 <span class="sub">按顺序排列，可混合材料库与临时上传</span></h2>
+    <div class="drop" id="drop">点击选择 或 拖拽到这里（临时上传，不入库）<br>
+      <span class="muted">支持 PDF / Word(docx,doc) / 图片，可多选</span></div>
+    <input type="file" id="fileInput" multiple accept=".pdf,.docx,.doc,.odt,.rtf,.png,.jpg,.jpeg" style="display:none">
+    <ul class="flist" id="fileList"></ul>
+    <div class="notice" id="wordNotice" style="display:none">
+      ⚠ 检测到 Word 文件：服务器会用 LibreOffice 转成 PDF。因服务器字体与 Windows 宋体度量不同，
+      <b>换行与分页位置可能与 Word 原版有差异</b>。若对版式要求严格，建议在 Word 里「另存为 PDF」后再上传 PDF。
+    </div>
+  </div>
+
+  <!-- 目录编辑 -->
+  <div class="card">
+    <h2><span class="step">2</span>编辑目录</h2>
+    <div class="toolbar">
+      <button class="btn" id="btnAuto">⚙ 按材料名自动生成</button>
+      <label class="chk"><input type="checkbox" id="stripPrefix" checked>去掉 "01_" 这类序号前缀</label>
+      <button class="btn" id="btnAdd">＋ 添加条目</button>
+      <button class="btn" id="btnClear">清空</button>
+    </div>
+    <div class="tocrow head"><span>层级</span><span>标题</span><span>跳转目标</span><span>目标值</span><span style="text-align:right">操作</span></div>
+    <div id="tocRows"></div>
+    <h2 style="margin-top:18px">实时预览</h2>
+    <div class="preview" id="preview">（还没有目录条目）</div>
+  </div>
+
+  <!-- 选项 -->
+  <div class="card">
+    <h2><span class="step">3</span>选项</h2>
+    <div class="opts">
+      <label>目录大标题 <input type="text" id="tocTitle" value="目录"></label>
+      <label>输出文件名 <input type="text" id="outName" value="合并文档" placeholder="合并文档"><span class="muted">.pdf</span></label>
+      <div>
+        <div class="muted" style="margin-bottom:4px">页码口径</div>
+        <div class="radio-group">
+          <label><input type="radio" name="numbering" value="physical" checked>物理页码（目录页算第1页）</label>
+          <label><input type="radio" name="numbering" value="body">正文页码（正文第1页算1）</label>
+        </div>
+      </div>
+      <label class="chk"><input type="checkbox" id="bookmarks" checked>同时生成侧栏书签</label>
+      <label>压缩到 ≤ <input type="number" id="compressMb" min="1" max="200" step="1" placeholder="不压缩" style="width:90px"> MB</label>
+    </div>
+    <div class="muted" style="margin-top:8px">目录页字体：中文宋体（SimSun）+ 西文 Times New Roman ·
+      压缩会降低扫描件图像分辨率（自动选 ≤ 目标大小的最高清晰度），文字不受影响</div>
+  </div>
+
+  <div style="text-align:center">
+    <button class="btn primary" id="btnGen">生成合并 PDF</button>
+  </div>
+
+  <div class="card" id="resultCard">
+    <h2><span class="step">✓</span>完成</h2>
+    <div id="resultStats" style="margin-bottom:10px"></div>
+    <a class="btn primary" id="btnDownload" download>下载 合并文档.pdf</a>
+    <iframe id="pdfPreview"></iframe>
+  </div>
+</div>
+
+<script>
+/* items: 合并列表，元素形如
+   { src:'upload', name:'a.pdf', file:File, pages:n }
+   { src:'library', id:'xxx', name:'推荐信', pages:n }               */
+const state = { items: [], library: [] };
+const $ = id => document.getElementById(id);
+const DOC_RE = /\.(docx?|odt|rtf)$/i;
+const OK_RE = /\.(pdf|docx?|odt|rtf|png|jpe?g)$/i;
+
+function showMsg(text, type = 'err', keep = false) {
+  const b = $('banner');
+  b.innerHTML = text; b.className = 'banner ' + type;
+  if (!keep && type !== 'err') setTimeout(() => { b.className = 'banner'; }, 5000);
+}
+const fmtSize = s => s > 1048576 ? (s/1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(s/1024)) + ' KB';
+const stripExt = n => n.replace(/\.[^.]+$/, '');
+const stripNum = n => n.replace(/^\d+[\s._\-]+/, '');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------------- 材料库 ---------------- */
+async function loadLibrary() {
+  try {
+    const r = await fetch('/api/library');
+    const d = await r.json();
+    state.library = d.items || [];
+    renderLibrary();
+  } catch (e) { showMsg('材料库加载失败：' + e.message); }
+}
+function renderLibrary() {
+  $('libCount').textContent = state.library.length ? `（${state.library.length} 份）` : '（空）';
+  $('libGrid').innerHTML = state.library.map(it => `
+    <div class="libitem" data-id="${it.id}">
+      <div class="top">
+        <span class="nm">${esc(it.name)}</span>
+        ${it.converted ? '<span class="tag word">已转PDF</span>' : ''}
+      </div>
+      <div class="info">${it.pages} 页 · ${fmtSize(it.size)} · ${it.added_at}</div>
+      <div class="acts">
+        <button class="btn sm" data-act="add">＋ 加入合并</button>
+        <a class="btn sm" href="/api/library/preview/${it.id}" target="_blank">预览</a>
+        <button class="btn sm" data-act="rename">改名</button>
+        <button class="btn sm" data-act="del">删除</button>
+      </div>
+    </div>`).join('') || '<div class="muted">材料库还是空的，点上方「上传到材料库」添加常用材料</div>';
+}
+$('libHead').addEventListener('click', () => {
+  const hd = $('libHead'), body = $('libBody');
+  hd.classList.toggle('closed');
+  body.style.display = hd.classList.contains('closed') ? 'none' : 'block';
+});
+$('btnLibUpload').addEventListener('click', e => { e.stopPropagation(); $('libInput').click(); });
+$('libInput').addEventListener('change', async e => {
+  const files = [...e.target.files]; e.target.value = '';
+  if (!files.length) return;
+  const bad = files.filter(f => !OK_RE.test(f.name));
+  if (bad.length) return showMsg('不支持的文件类型：' + bad.map(f => f.name).join('、'));
+  const hasWord = files.some(f => DOC_RE.test(f.name));
+  showMsg(`<span class="spinner"></span> 正在上传到材料库${hasWord ? '并转换 Word（首次较慢，请稍候）' : ''}…`, 'info', true);
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f, f.name));
+  try {
+    const r = await fetch('/api/library/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) return showMsg('上传失败：' + (d.error || r.status));
+    state.library = d.items || [];
+    renderLibrary(); renderTocRows();
+    if (d.errors && d.errors.length) showMsg('部分失败：' + d.errors.join('；'));
+    else showMsg(`已入库 ${d.added.length} 份材料`, 'ok');
+  } catch (e) { showMsg('上传失败：' + e.message); }
+});
+$('libGrid').addEventListener('click', async e => {
+  const box = e.target.closest('.libitem'); if (!box) return;
+  const btn = e.target.closest('button'); if (!btn) return;
+  const id = box.dataset.id;
+  const item = state.library.find(x => x.id === id); if (!item) return;
+  if (btn.dataset.act === 'add') {
+    state.items.push({ src: 'library', id, name: item.name, pages: item.pages });
+    renderItems(); renderTocRows();
+    showMsg(`已加入合并列表：${item.name}`, 'ok');
+  } else if (btn.dataset.act === 'rename') {
+    const nv = prompt('新名称：', item.name); if (nv === null) return;
+    const fd = new FormData(); fd.append('item_id', id); fd.append('name', nv);
+    const r = await fetch('/api/library/rename', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) return showMsg('改名失败：' + (d.error || r.status));
+    state.library = d.items; renderLibrary();
+    state.items.forEach(x => { if (x.src === 'library' && x.id === id) x.name = nv.trim(); });
+    renderItems(); renderTocRows();
+  } else if (btn.dataset.act === 'del') {
+    if (!confirm(`确定从材料库删除「${item.name}」？（合并列表中的该项也会移除）`)) return;
+    const fd = new FormData(); fd.append('item_id', id);
+    const r = await fetch('/api/library/delete', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) return showMsg('删除失败：' + (d.error || r.status));
+    state.library = d.items;
+    state.items = state.items.filter(x => !(x.src === 'library' && x.id === id));
+    renderLibrary(); renderItems(); renderTocRows();
+    showMsg('已删除', 'ok');
+  }
+});
+
+/* ---------------- 合并列表 ---------------- */
+function addUploads(list) {
+  for (const f of list) {
+    if (!OK_RE.test(f.name)) { showMsg(`不支持的文件类型：${f.name}`); continue; }
+    if (state.items.some(x => x.src === 'upload' && x.name === f.name)) {
+      showMsg(`临时上传中已有同名文件「${f.name}」`); continue;
+    }
+    state.items.push({ src: 'upload', name: f.name, file: f, pages: null });
+  }
+  renderItems(); renderTocRows(); probePages();
+}
+async function probePages() {
+  const pend = state.items.filter(x => x.src === 'upload' && x.pages === null);
+  if (!pend.length) return;
+  const fd = new FormData();
+  pend.forEach(x => fd.append('files', x.file, x.name));
+  try {
+    const r = await fetch('/api/probe', { method: 'POST', body: fd });
+    const d = await r.json();
+    (d.files || []).forEach(info => {
+      const it = state.items.find(x => x.src === 'upload' && x.name === info.name);
+      if (it) { it.pages = info.pages; if (info.error) it.err = info.error; }
+    });
+    const errs = (d.files || []).filter(f => f.error);
+    if (errs.length) showMsg('部分文件无法读取：' + errs.map(f => f.error).join('；'));
+    renderItems();
+  } catch (e) { /* 页数只是显示用，失败不阻塞 */ }
+}
+function renderItems() {
+  $('fileList').innerHTML = state.items.map((it, i) => {
+    const isWord = it.src === 'upload' && DOC_RE.test(it.name);
+    const pages = it.pages === null ? '<span class="spinner"></span>' : `${it.pages} 页`;
+    return `<li>
+      <span class="idx">${i+1}</span>
+      <span class="tag ${it.src === 'library' ? 'lib' : 'up'}">${it.src === 'library' ? '材料库' : '临时'}</span>
+      ${isWord ? '<span class="tag word">Word→PDF</span>' : ''}
+      <span class="fname">${esc(it.name)}</span>
+      <span class="meta">${pages}</span>
+      <button class="icon-btn" data-act="up" data-i="${i}" title="上移">↑</button>
+      <button class="icon-btn" data-act="down" data-i="${i}" title="下移">↓</button>
+      <button class="icon-btn danger" data-act="del" data-i="${i}" title="移除">✕</button>
+    </li>`;
+  }).join('') || '<li class="muted" style="border:none;background:transparent">（列表为空：从材料库「加入合并」或拖入文件）</li>';
+  $('wordNotice').style.display = state.items.some(x => x.src === 'upload' && DOC_RE.test(x.name)) ? 'block' : 'none';
+}
+$('drop').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', e => { addUploads(e.target.files); e.target.value = ''; });
+['dragover','dragenter'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave','drop'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', e => addUploads(e.dataTransfer.files));
+$('fileList').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  const i = +btn.dataset.i;
+  if (btn.dataset.act === 'up' && i > 0) [state.items[i-1], state.items[i]] = [state.items[i], state.items[i-1]];
+  if (btn.dataset.act === 'down' && i < state.items.length-1) [state.items[i+1], state.items[i]] = [state.items[i], state.items[i+1]];
+  if (btn.dataset.act === 'del') state.items.splice(i, 1);
+  renderItems(); renderTocRows();
+});
+
+/* ---------------- 目录行 ---------------- */
+state.rows = [];
+const itemLabel = (it, i) => `${i+1}. ${it.name}`;
+
+function renderTocRows() {
+  $('tocRows').innerHTML = state.rows.map((r, i) => {
+    // 材料被删掉后回退到第一个，避免悬空引用
+    if (r.type === 'item' && !(r.value >= 0 && r.value < state.items.length)) {
+      r.value = state.items.length ? 0 : '';
+    }
+    const valueCell = r.type === 'item'
+      ? `<select data-k="value">${
+          state.items.length
+            ? state.items.map((it, k) =>
+                `<option value="${k}" ${k === r.value ? 'selected' : ''}>${esc(itemLabel(it, k))}</option>`).join('')
+            : '<option value="">（无材料）</option>'
+        }</select>`
+      : `<input type="number" min="1" data-k="value" value="${r.value}" placeholder="正文页码">`;
+    return `<div class="tocrow" data-i="${i}">
+      <select data-k="level">${[1,2,3].map(l =>
+        `<option value="${l}" ${r.level == l ? 'selected' : ''}>${l} 级</option>`).join('')}</select>
+      <input type="text" data-k="title" value="${esc(r.title)}" placeholder="条目标题">
+      <select data-k="type">
+        <option value="item" ${r.type === 'item' ? 'selected' : ''}>材料首页</option>
+        <option value="page" ${r.type === 'page' ? 'selected' : ''}>正文第 N 页</option>
+      </select>
+      ${valueCell}
+      <div class="rowbtns">
+        <button class="icon-btn" data-act="up" title="上移">↑</button>
+        <button class="icon-btn" data-act="down" title="下移">↓</button>
+        <button class="icon-btn danger" data-act="del" title="删除">✕</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="muted" style="padding:8px 0">（还没有目录条目）</div>';
+  renderPreview();
+}
+$('btnAdd').addEventListener('click', () => {
+  state.rows.push({ level: 1, title: '', type: 'item', value: state.items.length ? 0 : '' });
+  renderTocRows();
+});
+$('btnClear').addEventListener('click', () => { state.rows = []; renderTocRows(); });
+$('btnAuto').addEventListener('click', () => {
+  if (!state.items.length) return showMsg('请先添加材料到合并列表');
+  const strip = $('stripPrefix').checked;
+  state.rows = state.items.map((it, i) => {
+    let t = stripExt(it.name); if (strip) t = stripNum(t);
+    return { level: 1, title: t, type: 'item', value: i };
+  });
+  renderTocRows();
+});
+$('tocRows').addEventListener('input', e => {
+  const row = e.target.closest('.tocrow'); if (!row) return;
+  const i = +row.dataset.i, k = e.target.dataset.k, v = e.target.value;
+  if (k === 'level') state.rows[i].level = +v;
+  if (k === 'title') state.rows[i].title = v;
+  if (k === 'value') state.rows[i].value = state.rows[i].type === 'item' ? +v : v;
+  if (k === 'type') { state.rows[i].type = v; state.rows[i].value = v === 'item' ? 0 : ''; renderTocRows(); return; }
+  renderPreview();
+});
+$('tocRows').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  const i = +btn.closest('.tocrow').dataset.i;
+  if (btn.dataset.act === 'up' && i > 0) [state.rows[i-1], state.rows[i]] = [state.rows[i], state.rows[i-1]];
+  if (btn.dataset.act === 'down' && i < state.rows.length-1) [state.rows[i+1], state.rows[i]] = [state.rows[i], state.rows[i+1]];
+  if (btn.dataset.act === 'del') state.rows.splice(i, 1);
+  renderTocRows();
+});
+function renderPreview() {
+  const p = $('preview');
+  if (!state.rows.length) { p.innerHTML = '（还没有目录条目）'; return; }
+  // 估算物理页码：目录页数按 24 条/页 + 各材料页数累加
+  const tocPages = Math.max(1, Math.ceil(state.rows.length / 24));
+  const known = state.items.every(x => typeof x.pages === 'number' && x.pages > 0);
+  const starts = []; let acc = 0;
+  state.items.forEach(x => { starts.push(acc); acc += (x.pages || 0); });
+  const numbering = document.querySelector('input[name=numbering]:checked').value;
+  p.innerHTML = state.rows.map(r => {
+    let pg = '?';
+    if (known) {
+      const bodyIdx = r.type === 'item' ? starts[r.value] : (parseInt(r.value) - 1);
+      if (bodyIdx >= 0) pg = numbering === 'physical' ? tocPages + bodyIdx + 1 : bodyIdx + 1;
+    }
+    return `<div class="lv${r.level} pl"><span>${esc(r.title || '（未命名）')}</span>
+      <span class="dot"></span><span class="pg">${pg}</span></div>`;
+  }).join('');
+}
+document.querySelectorAll('input[name=numbering]').forEach(el => el.addEventListener('change', renderPreview));
+
+/* ---------------- 生成 ---------------- */
+$('btnGen').addEventListener('click', async () => {
+  $('banner').className = 'banner';
+  $('resultCard').style.display = 'none';
+  if (!state.items.length) return showMsg('合并列表为空');
+  if (!state.rows.length) return showMsg('目录没有条目：点「按材料名自动生成」或「添加条目」');
+  for (const r of state.rows) {
+    if (!r.title.trim()) return showMsg('存在空标题的目录条目');
+    if (r.type === 'page' && !(parseInt(r.value) >= 1)) return showMsg(`「${r.title}」的页码无效（应为 ≥1 的整数）`);
+    if (r.type === 'item' && !(r.value >= 0)) return showMsg(`「${r.title}」没有选择目标材料`);
+  }
+  const compVal = $('compressMb').value.trim();
+  const cfg = {
+    title: $('tocTitle').value || '目录',
+    filename: $('outName').value.trim() || '合并文档',
+    numbering: document.querySelector('input[name=numbering]:checked').value,
+    bookmarks: $('bookmarks').checked,
+    ...(compVal && parseFloat(compVal) > 0 ? { compress: { target_mb: parseFloat(compVal) } } : {}),
+    items: state.items.map(it => it.src === 'library'
+      ? { src: 'library', id: it.id } : { src: 'upload', name: it.name }),
+    toc: state.rows.map(r => r.type === 'item'
+      ? { level: r.level, title: r.title.trim(), item: r.value }
+      : { level: r.level, title: r.title.trim(), page: parseInt(r.value) })
+  };
+  const fd = new FormData();
+  state.items.filter(x => x.src === 'upload').forEach(x => fd.append('files', x.file, x.name));
+  fd.append('config', JSON.stringify(cfg));
+  const btn = $('btnGen'); const hasWord = state.items.some(x => x.src === 'upload' && DOC_RE.test(x.name));
+  const hasComp = compVal && parseFloat(compVal) > 0;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span> 正在合并${hasWord ? '并转换 Word' : ''}${hasComp ? '并压缩' : ''}…`;
+  try {
+    const res = await fetch('/api/merge', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) return showMsg('失败：' + (data.error || res.status));
+    $('resultStats').innerHTML = `共 <b>${data.pages}</b> 页（目录 ${data.toc_pages} 页 + 正文 ${data.pages - data.toc_pages} 页），
+      目录条目 <b>${data.entries}</b> 条，侧栏书签 ${cfg.bookmarks ? '已生成' : '未生成'}<br>
+      文件名：<b>${esc(data.filename)}</b>` +
+      (data.compress ? `<br>压缩：${data.compress.orig_mb} MB → <b>${data.compress.final_mb} MB</b>（${data.compress.dpi ? data.compress.dpi + 'dpi，' : ''}-${Math.round((1 - data.compress.final_mb / data.compress.orig_mb) * 100)}%）
+        ${data.compress.exceeded ? '<span style="color:var(--danger)">⚠ 最低清晰度仍超过目标，建议拆分文档</span>' : ''}` : '');
+    $('btnDownload').href = `/api/download/${data.job}`;
+    $('btnDownload').setAttribute('download', data.filename);
+    $('btnDownload').textContent = `下载 ${data.filename}`;
+    $('pdfPreview').src = `/api/download/${data.job}?inline=1`;
+    $('resultCard').style.display = 'block';
+    showMsg('生成成功', 'ok');
+    $('resultCard').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    showMsg('请求失败：' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '生成合并 PDF';
+  }
+});
+
+renderItems(); renderTocRows(); loadLibrary();
+</script>
+</body>
+</html>
