@@ -79,6 +79,31 @@ PDF_TOC_BIND_IP=0.0.0.0 PDF_TOC_PORT=8789 PDF_TOC_ACCESS_KEY=你的口令 python
 
 口令门机制：前端弹窗输口令 → 后端校验后发放 24h session token（内存存储）→ 所有 API 与下载链接需携带 token；无 token 访问一律 401（含下载直链）。
 
+## 多用户模式（每人独立材料库 + 管理员面板）
+
+实例目录存在 `users.json` 时自动进入多用户模式（优先级高于单口令）：
+
+```bash
+# 1. 初始化用户库并创建管理员
+python3 user_admin.py init admin 管理员口令
+# 2. 添加用户（口令缺省自动生成）
+python3 user_admin.py add zhangsan
+# 3. 更多 CLI：list / reset / disable / enable / delete
+python3 user_admin.py --help
+
+# 4. 启动（绑定 0.0.0.0 对外提供）
+PDF_TOC_BIND_IP=0.0.0.0 PDF_TOC_PORT=8789 python3 app.py
+```
+
+特性：
+- **每人独立库**：`library/<username>/`，登录后只能读写自己的材料，互不可见
+- **登录**：用户名 + 口令（scrypt 加盐哈希存储，不存明文）
+- **管理员面板**（admin 登录后可见）：用户列表（含材料数）、创建用户、重置口令、禁用/恢复（**禁用即刻生效**，已发放的 session 也会被拦截）、删除账号
+- **任务隔离**：合并产物按属主校验，他人无法下载你的 job
+- 密码与账号操作也可用 `user_admin.py` 在服务器上直接管理
+
+认证模式优先级：`users.json 存在`（多用户）> `PDF_TOC_ACCESS_KEY`（单口令）> 无认证。
+
 ## 安全说明
 
 - 服务**无内置认证**，请只绑定在可信网络内（如 Tailscale 网卡 IP），切勿用 0.0.0.0 暴露公网
