@@ -64,6 +64,7 @@ sudo systemctl enable --now pdf-toc-web
 | `PDF_TOC_JOBS_DIR` | `/tmp/pdf_toc_jobs` | 临时任务目录（2 小时自动清理） |
 | `PDF_TOC_FONT_DIR` | 自动查找 | 宋体/Times New Roman 字体目录，见 fonts/README.md |
 | `PDF_TOC_ACCESS_KEY` | 空（不启用） | 访问口令；设置后所有 API 需 session token，公网开放实例**务必设置** |
+| `PDF_TOC_BACKUP_TARGET` | 空（不启用） | 导出文件自动备份目标，格式 `win-pc:C:/Users/Admin/Desktop/PDF导出备份`；合并完成后后台 scp 传输（重试 3 次），成功后清理服务器工作文件 |
 
 ## 双实例部署（私用 + 公用）
 
@@ -103,6 +104,15 @@ PDF_TOC_BIND_IP=0.0.0.0 PDF_TOC_PORT=8789 python3 app.py
 - 密码与账号操作也可用 `user_admin.py` 在服务器上直接管理
 
 认证模式优先级：`users.json 存在`（多用户）> `PDF_TOC_ACCESS_KEY`（单口令）> 无认证。
+
+## 导出文件自动备份到电脑（scp）
+
+设置 `PDF_TOC_BACKUP_TARGET` 后启用（目标机需配置好 SSH 密钥）：
+
+- 合并完成 → 后台线程 scp 到目标（多用户模式按 `目标/<用户名>/` 分目录，非多用户为 `目标/private/`）
+- **重试 3 次**（0/30/60 秒）；PC 离线则标记失败，服务器副本保留 2 小时兜底
+- **成功后清理服务器侧工作文件**（raw_*/NNN_* 副本），仅保留 merged.pdf + meta.json 供下载（2 小时自动清理）
+- 状态轮询：前端结果区显示「正在备份→已备份 ✓ / PC 离线警告」，也可查 `GET /api/jobs/<job>/backup`
 
 ## 安全说明
 

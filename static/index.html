@@ -603,6 +603,15 @@ $('btnGen').addEventListener('click', async () => {
     $('pdfPreview').src = withToken(`/api/download/${data.job}?inline=1`);
     $('resultCard').style.display = 'block';
     showMsg('生成成功', 'ok');
+    // 备份状态：pending 时轮询显示进度
+    if (data.backup === 'pending') {
+      const be = document.createElement('div');
+      be.id = 'backupStatus';
+      be.innerHTML = '<span class="spinner"></span> 正在备份到你的电脑…';
+      be.style.marginTop = '4px';
+      $('resultStats').appendChild(be);
+      pollBackup(data.job);
+    }
     $('resultCard').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     showMsg('请求失败：' + err.message);
@@ -655,6 +664,21 @@ $('adminTable').addEventListener('click', async e => {
     r.ok ? (loadAdminUsers(), showMsg('已删除账号', 'ok')) : showMsg('失败：' + d.error);
   }
 });
+async function pollBackup(job) {
+  const el = $('backupStatus');
+  if (!el) return;
+  for (let i = 0; i < 24; i++) {          // 最多 2 分钟
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      const r = await apiFetch(`/api/jobs/${job}/backup`);
+      const d = await r.json();
+      if (d.status === 'ok') { el.innerHTML = '💾 已备份到你的电脑 ✓'; return; }
+      if (d.status === 'failed') { el.innerHTML = '⚠ PC 备份失败（电脑可能未开机），服务器副本保留 2 小时'; return; }
+    } catch (e) { return; }
+  }
+  el.innerHTML = '备份仍在进行（PC 可能刚开机），服务器副本保留 2 小时';
+}
+
 function init() { renderItems(); renderTocRows(); loadLibrary(); }
 
 /* 启动：探测认证模式 → 无认证直接进；有认证先验证 token，失败弹登录门 */

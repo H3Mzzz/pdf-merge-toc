@@ -39,6 +39,7 @@ sys.path.insert(0, BASE_DIR)
 from merge_pdf_toc import run_merge  # noqa: E402
 from compress import compress_to_target  # noqa: E402
 from user_admin import load_users, authenticate, add_user, hash_password  # noqa: E402
+from backup import schedule_backup  # noqa: E402
 
 # 监听地址与端口：通过环境变量配置（systemd 单元里设置），默认仅本机回环
 BIND_IP = os.environ.get("PDF_TOC_BIND_IP", "127.0.0.1")
@@ -52,6 +53,9 @@ IMG_EXT = {".png", ".jpg", ".jpeg"}
 DOC_EXT = {".docx", ".doc", ".odt", ".rtf"}          # 需 LibreOffice 转换
 ALLOWED_EXT = PDF_EXT | IMG_EXT | DOC_EXT
 SOFFICE_TIMEOUT = 180
+# 导出文件自动备份到 Windows PC（scp）：格式 "win-pc:C:/Users/Admin/Desktop/PDF导出备份"
+# 不设置则不启用。合并完成后后台传输，成功后清理服务器工作文件，失败保留 2 小时兜底。
+BACKUP_TARGET = os.environ.get("PDF_TOC_BACKUP_TARGET", "")
 
 # ---- 认证三态 ----
 AUTH_KEY = os.environ.get("PDF_TOC_ACCESS_KEY", "")   # 单口令（设置后启用）
@@ -496,8 +500,15 @@ async def api_merge(request: Request, files: list[UploadFile] = File(default=[])
 
     if MULTI_USER:
         _job_owner[job] = username      # 多用户模式记录任务属主，下载时校验
+
+    # 可选：后台备份导出文件到 PC（不阻塞响应）
+    backup = "disabled"
+    if BACKUP_TARGET:
+        schedule_backup(BACKUP_TARGET, workdir, out_path, fname, username)
+        backup = "pending"
+
     resp = {"ok": True, "job": job, "pages": total_pages, "toc_pages": toc_pages,
-            "entries": n, "filename": fname}
+            "entries": n, "filename": fname, "backup": backup}
     if comp_info:
         resp["compress"] = comp_info
     return resp
@@ -523,6 +534,25 @@ async def api_probe(files: list[UploadFile] = File(...)):
                 err = str(e)
         out.append({"name": name, "pages": pages, "error": err})
     return {"files": out}
+
+
+@app.get("/api/jobs/{job}/backup")
+def job_backup_status(request: Request, job: str):
+    """备份状态查询：pending(进行中) / ok / failed / disabled。前端生成后轮询。"""
+    if not re.fullmatch(r"[0-9a-f]{10}", job):
+        return JSONResponse({"error": "非法 job id"}, status_code=400)
+    if MULTI_USER:
+        u = _cur_user(request)
+        if not u or (u["role"] != "admin" and _job_owner.get(job) != u["username"]):
+            return JSONResponse({"error": "无权访问该任务"}, status_code=403)
+    p = os.path.join(JOBS_DIR, job, "backup.json")
+    if not os.path.exists(p):
+        return {"status": "pending"}
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"status": "pending"}
 
 
 @app.get("/api/download/{job}")
