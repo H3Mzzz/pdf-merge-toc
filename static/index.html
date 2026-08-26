@@ -276,6 +276,7 @@ function renderUserBar() {
   bar.style.display = 'flex';
   bar.innerHTML = AUTH_MODE === 'users'
     ? `<span>当前用户：<b class="uname">${esc(AUTH_USER)}</b>${AUTH_ROLE === 'admin' ? ' <span class="tag word">管理员</span>' : ''}</span>
+       <button class="btn sm" id="btnChangePwd">修改密码</button>
        <button class="btn sm" id="btnLogout">退出登录</button>`
     : '<span>口令门模式</span>';
   const lo = document.getElementById('btnLogout');
@@ -285,6 +286,49 @@ function renderUserBar() {
     AUTH_TOKEN = ''; AUTH_USER = ''; AUTH_ROLE = '';
     location.reload();
   };
+  const cp = document.getElementById('btnChangePwd');
+  if (cp) cp.onclick = () => showChangePwd();
+}
+
+function showChangePwd() {
+  const g = document.createElement('div');
+  g.className = 'gate';
+  g.innerHTML = `<div class="gatebox" style="width:340px">
+    <h3>修改密码</h3>
+    <p style="text-align:left">${esc(AUTH_USER)}</p>
+    <input type="password" id="pwdOld" placeholder="当前口令" autocomplete="current-password">
+    <input type="password" id="pwdNew" placeholder="新口令（至少 6 位）" autocomplete="new-password">
+    <input type="password" id="pwdNew2" placeholder="再次输入新口令" autocomplete="new-password">
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="pwdCancel" style="flex:1;justify-content:center">取消</button>
+      <button class="btn primary" id="pwdSubmit" style="flex:1;justify-content:center">确认修改</button>
+    </div>
+  </div>`;
+  document.body.appendChild(g);
+  $('pwdCancel').onclick = () => g.remove();
+  $('pwdSubmit').onclick = async () => {
+    const oldP = $('pwdOld').value;
+    const newP = $('pwdNew').value;
+    const newP2 = $('pwdNew2').value;
+    const msg = document.querySelector('.gatebox p');
+    if (newP.length < 6) { msg.textContent = '新口令至少 6 位'; return; }
+    if (newP !== newP2) { msg.textContent = '两次输入的新口令不一致'; return; }
+    if (newP === oldP) { msg.textContent = '新口令不能与当前口令相同'; return; }
+    $('pwdSubmit').disabled = true;
+    try {
+      const r = await apiFetch('/api/auth/password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_password: oldP, new_password: newP })
+      });
+      const d = await r.json();
+      if (!r.ok) { msg.textContent = d.error || '修改失败'; $('pwdSubmit').disabled = false; return; }
+      g.remove();
+      showMsg('密码已修改', 'ok');
+    } catch (e) {
+      if (e.message !== '未授权') { msg.textContent = '网络错误，请重试'; $('pwdSubmit').disabled = false; }
+    }
+  };
+  $('pwdOld').focus();
 }
 
 /* ---- 管理员面板（多用户模式 + admin 角色）---- */
@@ -603,15 +647,7 @@ $('btnGen').addEventListener('click', async () => {
     $('pdfPreview').src = withToken(`/api/download/${data.job}?inline=1`);
     $('resultCard').style.display = 'block';
     showMsg('生成成功', 'ok');
-    // 备份状态：pending 时轮询显示进度
-    if (data.backup === 'pending') {
-      const be = document.createElement('div');
-      be.id = 'backupStatus';
-      be.innerHTML = '<span class="spinner"></span> 正在备份到你的电脑…';
-      be.style.marginTop = '4px';
-      $('resultStats').appendChild(be);
-      pollBackup(data.job);
-    }
+    // 备份流程全程静默：后台自动备份到 PC，不显示进度、不提醒
     $('resultCard').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     showMsg('请求失败：' + err.message);
@@ -664,21 +700,6 @@ $('adminTable').addEventListener('click', async e => {
     r.ok ? (loadAdminUsers(), showMsg('已删除账号', 'ok')) : showMsg('失败：' + d.error);
   }
 });
-async function pollBackup(job) {
-  const el = $('backupStatus');
-  if (!el) return;
-  for (let i = 0; i < 24; i++) {          // 最多 2 分钟
-    await new Promise(r => setTimeout(r, 5000));
-    try {
-      const r = await apiFetch(`/api/jobs/${job}/backup`);
-      const d = await r.json();
-      if (d.status === 'ok') { el.innerHTML = '💾 已备份到你的电脑 ✓'; return; }
-      if (d.status === 'failed') { el.innerHTML = '⚠ PC 备份失败（电脑可能未开机），服务器副本保留 2 小时'; return; }
-    } catch (e) { return; }
-  }
-  el.innerHTML = '备份仍在进行（PC 可能刚开机），服务器副本保留 2 小时';
-}
-
 function init() { renderItems(); renderTocRows(); loadLibrary(); }
 
 /* 启动：探测认证模式 → 无认证直接进；有认证先验证 token，失败弹登录门 */

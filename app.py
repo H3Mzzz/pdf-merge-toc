@@ -17,7 +17,8 @@ pdf-toc-web — PDF 合并 + 目录页生成器的 Web 服务。
 
 安全说明：
 - 公网开放实例务必启用单口令或多用户模式；无认证模式只可绑 127.0.0.1/可信内网
-- 临时任务存 <job_dir>/<job>/，2 小时后自动清理，下载按任务属主校验
+- 临时任务存 <job_dir>/<job>/：备份已完成的 2 小时后清理；PC 离线等待补备份的保留 6 小时
+  （daemon 每分钟探测 PC，上线自动补备份）；下载按任务属主校验
 """
 import json
 import os
@@ -39,7 +40,7 @@ sys.path.insert(0, BASE_DIR)
 from merge_pdf_toc import run_merge  # noqa: E402
 from compress import compress_to_target  # noqa: E402
 from user_admin import load_users, authenticate, add_user, hash_password  # noqa: E402
-from backup import schedule_backup  # noqa: E402
+from backup import BACKUP_KEEP_HOURS, schedule_backup, start_backup_daemon  # noqa: E402
 
 # 监听地址与端口：通过环境变量配置（systemd 单元里设置），默认仅本机回环
 BIND_IP = os.environ.get("PDF_TOC_BIND_IP", "127.0.0.1")
@@ -105,14 +106,37 @@ def _require_admin(request: Request):
 
 
 # ---------------- 通用工具 ----------------
+def _job_age_seconds(p):
+    """任务年龄以 merged.pdf 的 mtime 为准（backup.json 会被反复重写，不能作基准）。"""
+    mp = os.path.join(p, "merged.pdf")
+    if os.path.exists(mp):
+        return time.time() - os.path.getmtime(mp)
+    return time.time() - os.path.getmtime(p)
+
+
+def _backup_pending(p):
+    """是否有未完成的备份（PC 离线等待补备份）。"""
+    bj = os.path.join(p, "backup.json")
+    if not os.path.exists(bj):
+        return False
+    try:
+        with open(bj, encoding="utf-8") as f:
+            return json.load(f).get("status") in ("pending", "failed", "running")
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def sweep_old_jobs():
-    now = time.time()
+    """清理过期任务：备份未完成的保留 6 小时（等 PC 上线补备份），其余 2 小时。"""
     if not os.path.isdir(JOBS_DIR):
         return
     for d in os.listdir(JOBS_DIR):
         p = os.path.join(JOBS_DIR, d)
+        if not os.path.isdir(p):
+            continue
         try:
-            if os.path.isdir(p) and now - os.path.getmtime(p) > JOB_KEEP_HOURS * 3600:
+            keep = BACKUP_KEEP_HOURS if _backup_pending(p) else JOB_KEEP_HOURS
+            if _job_age_seconds(p) > keep * 3600:
                 shutil.rmtree(p, ignore_errors=True)
                 _job_owner.pop(d, None)
         except OSError:
@@ -275,6 +299,40 @@ async def api_auth(payload: dict = Body(...)):
 async def api_logout(request: Request):
     tok = request.headers.get("x-auth-token") or request.query_params.get("token")
     _sessions.pop(tok or "", None)
+    return {"ok": True}
+
+
+@app.post("/api/auth/password")
+async def api_change_password(request: Request, payload: dict = Body(...)):
+    """登录用户自助修改密码（仅多用户模式）。
+
+    校验当前口令 → 新口令至少 6 位 → 更新 users.json → 使该用户其他会话失效（保留当前）。
+    """
+    if not MULTI_USER:
+        return JSONResponse({"error": "当前实例未启用多用户模式"}, status_code=400)
+    u = _cur_user(request)
+    if not u or not u.get("username"):
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    users = load_users(BASE_DIR)
+    cu = users.get(u["username"])
+    if not cu:
+        return JSONResponse({"error": "账号不存在"}, status_code=401)
+    old = payload.get("old_password") or ""
+    new = payload.get("new_password") or ""
+    if not authenticate(users, u["username"], old):
+        return JSONResponse({"error": "当前口令错误"}, status_code=400)
+    if len(new) < 6:
+        return JSONResponse({"error": "新口令至少 6 位"}, status_code=400)
+    if new == old:
+        return JSONResponse({"error": "新口令不能与当前口令相同"}, status_code=400)
+    cu["hash"] = hash_password(new)
+    from user_admin import save_users
+    save_users(users, BASE_DIR)
+    # 使该用户的其他会话失效（防旧设备继续使用旧口令）
+    tok = request.headers.get("x-auth-token") or request.query_params.get("token")
+    for t, s in list(_sessions.items()):
+        if s.get("username") == u["username"] and t != tok:
+            del _sessions[t]
     return {"ok": True}
 
 
@@ -677,4 +735,7 @@ if __name__ == "__main__":
     import uvicorn
     os.makedirs(JOBS_DIR, exist_ok=True)
     os.makedirs(LIB_DIR, exist_ok=True)
+    if BACKUP_TARGET:
+        # 后台 daemon：每 60 秒探测 PC，上线即补备份离线期间的合并产物
+        start_backup_daemon(BACKUP_TARGET, JOBS_DIR)
     uvicorn.run(app, host=BIND_IP, port=PORT, log_level="warning")
