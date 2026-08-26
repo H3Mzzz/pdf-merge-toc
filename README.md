@@ -138,7 +138,7 @@ python3 user_admin.py delete <用户名>                # 删除（材料库保�
 ```json
 {
   "title": "申报材料目录",
-  "filename": "卓志勇-保研申请材料",
+  "filename": "申请材料",
   "numbering": "physical",
   "bookmarks": true,
   "compress": {"target_mb": 20},
