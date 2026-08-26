@@ -69,6 +69,17 @@
   .banner.err { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; display: block; }
   .banner.ok { background: #f0fdf4; color: var(--ok); border: 1px solid #bbf7d0; display: block; }
   .banner.info { background: #eff6ff; color: var(--primary-dark); border: 1px solid #bfdbfe; display: block; }
+  .gate {
+    position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 999;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .gatebox { background: #fff; border-radius: 14px; padding: 26px 30px; width: 320px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.3); text-align: center; }
+  .gatebox h3 { margin-bottom: 6px; }
+  .gatebox p { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .gatebox input { width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 14px; margin-bottom: 10px; }
+  .gatebox .btn { width: 100%; justify-content: center; }
   .notice { background: #fffbeb; border: 1px solid #fde68a; color: var(--warn); border-radius: 8px;
     padding: 8px 12px; font-size: 12px; margin-top: 10px; }
   #resultCard { display: none; }
@@ -172,6 +183,47 @@
 </div>
 
 <script>
+/* ---- 访问口令门（服务端设置口令时启用）---- */
+let AUTH_TOKEN = localStorage.getItem('pdf_toc_token') || '';
+function showGate(err) {
+  if (document.querySelector('.gate')) return;
+  const g = document.createElement('div');
+  g.className = 'gate';
+  g.innerHTML = `<div class="gatebox">
+    <h3>访问口令</h3>
+    <p>${err || '请输入访问口令'}</p>
+    <input type="password" id="gateKey" placeholder="口令" autocomplete="off">
+    <button class="btn primary" id="gateBtn">进入</button>
+  </div>`;
+  document.body.appendChild(g);
+  $('gateBtn').onclick = () => submitKey($('gateKey').value);
+  $('gateKey').onkeydown = e => { if (e.key === 'Enter') submitKey($('gateKey').value); };
+  $('gateKey').focus();
+}
+async function submitKey(key) {
+  try {
+    const r = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }) });
+    const d = await r.json();
+    if (!r.ok) { document.querySelector('.gatebox p').textContent = '口令错误，请重试'; $('gateKey').value = ''; return; }
+    AUTH_TOKEN = d.token || '';
+    localStorage.setItem('pdf_toc_token', AUTH_TOKEN);
+    document.querySelector('.gate').remove();
+    init();
+  } catch (e) { document.querySelector('.gatebox p').textContent = '网络错误，请重试'; }
+}
+async function apiFetch(url, opts = {}) {
+  opts.headers = Object.assign({ 'X-Auth-Token': AUTH_TOKEN }, opts.headers || {});
+  const r = await fetch(url, opts);
+  if (r.status === 401) {
+    AUTH_TOKEN = ''; localStorage.removeItem('pdf_toc_token');
+    showGate('会话过期，请重新输入口令');
+    throw new Error('未授权');
+  }
+  return r;
+}
+function withToken(url) { return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(AUTH_TOKEN || ''); }
+
 /* items: 合并列表，元素形如
    { src:'upload', name:'a.pdf', file:File, pages:n }
    { src:'library', id:'xxx', name:'推荐信', pages:n }               */
@@ -193,11 +245,11 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':
 /* ---------------- 材料库 ---------------- */
 async function loadLibrary() {
   try {
-    const r = await fetch('/api/library');
+    const r = await apiFetch('/api/library');
     const d = await r.json();
     state.library = d.items || [];
     renderLibrary();
-  } catch (e) { showMsg('材料库加载失败：' + e.message); }
+  } catch (e) { if (e.message !== '未授权') showMsg('材料库加载失败：' + e.message); }
 }
 function renderLibrary() {
   $('libCount').textContent = state.library.length ? `（${state.library.length} 份）` : '（空）';
@@ -210,7 +262,7 @@ function renderLibrary() {
       <div class="info">${it.pages} 页 · ${fmtSize(it.size)} · ${it.added_at}</div>
       <div class="acts">
         <button class="btn sm" data-act="add">＋ 加入合并</button>
-        <a class="btn sm" href="/api/library/preview/${it.id}" target="_blank">预览</a>
+        <a class="btn sm" href="${withToken(`/api/library/preview/${it.id}`)}" target="_blank">预览</a>
         <button class="btn sm" data-act="rename">改名</button>
         <button class="btn sm" data-act="del">删除</button>
       </div>
@@ -232,7 +284,7 @@ $('libInput').addEventListener('change', async e => {
   const fd = new FormData();
   files.forEach(f => fd.append('files', f, f.name));
   try {
-    const r = await fetch('/api/library/upload', { method: 'POST', body: fd });
+    const r = await apiFetch('/api/library/upload', { method: 'POST', body: fd });
     const d = await r.json();
     if (!r.ok) return showMsg('上传失败：' + (d.error || r.status));
     state.library = d.items || [];
@@ -253,7 +305,7 @@ $('libGrid').addEventListener('click', async e => {
   } else if (btn.dataset.act === 'rename') {
     const nv = prompt('新名称：', item.name); if (nv === null) return;
     const fd = new FormData(); fd.append('item_id', id); fd.append('name', nv);
-    const r = await fetch('/api/library/rename', { method: 'POST', body: fd });
+    const r = await apiFetch('/api/library/rename', { method: 'POST', body: fd });
     const d = await r.json();
     if (!r.ok) return showMsg('改名失败：' + (d.error || r.status));
     state.library = d.items; renderLibrary();
@@ -262,7 +314,7 @@ $('libGrid').addEventListener('click', async e => {
   } else if (btn.dataset.act === 'del') {
     if (!confirm(`确定从材料库删除「${item.name}」？（合并列表中的该项也会移除）`)) return;
     const fd = new FormData(); fd.append('item_id', id);
-    const r = await fetch('/api/library/delete', { method: 'POST', body: fd });
+    const r = await apiFetch('/api/library/delete', { method: 'POST', body: fd });
     const d = await r.json();
     if (!r.ok) return showMsg('删除失败：' + (d.error || r.status));
     state.library = d.items;
@@ -289,7 +341,7 @@ async function probePages() {
   const fd = new FormData();
   pend.forEach(x => fd.append('files', x.file, x.name));
   try {
-    const r = await fetch('/api/probe', { method: 'POST', body: fd });
+    const r = await apiFetch('/api/probe', { method: 'POST', body: fd });
     const d = await r.json();
     (d.files || []).forEach(info => {
       const it = state.items.find(x => x.src === 'upload' && x.name === info.name);
@@ -451,7 +503,7 @@ $('btnGen').addEventListener('click', async () => {
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span> 正在合并${hasWord ? '并转换 Word' : ''}${hasComp ? '并压缩' : ''}…`;
   try {
-    const res = await fetch('/api/merge', { method: 'POST', body: fd });
+    const res = await apiFetch('/api/merge', { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) return showMsg('失败：' + (data.error || res.status));
     $('resultStats').innerHTML = `共 <b>${data.pages}</b> 页（目录 ${data.toc_pages} 页 + 正文 ${data.pages - data.toc_pages} 页），
@@ -459,10 +511,10 @@ $('btnGen').addEventListener('click', async () => {
       文件名：<b>${esc(data.filename)}</b>` +
       (data.compress ? `<br>压缩：${data.compress.orig_mb} MB → <b>${data.compress.final_mb} MB</b>（${data.compress.dpi ? data.compress.dpi + 'dpi，' : ''}-${Math.round((1 - data.compress.final_mb / data.compress.orig_mb) * 100)}%）
         ${data.compress.exceeded ? '<span style="color:var(--danger)">⚠ 最低清晰度仍超过目标，建议拆分文档</span>' : ''}` : '');
-    $('btnDownload').href = `/api/download/${data.job}`;
+    $('btnDownload').href = withToken(`/api/download/${data.job}`);
     $('btnDownload').setAttribute('download', data.filename);
     $('btnDownload').textContent = `下载 ${data.filename}`;
-    $('pdfPreview').src = `/api/download/${data.job}?inline=1`;
+    $('pdfPreview').src = withToken(`/api/download/${data.job}?inline=1`);
     $('resultCard').style.display = 'block';
     showMsg('生成成功', 'ok');
     $('resultCard').scrollIntoView({ behavior: 'smooth' });
@@ -473,7 +525,18 @@ $('btnGen').addEventListener('click', async () => {
   }
 });
 
-renderItems(); renderTocRows(); loadLibrary();
+function init() { renderItems(); renderTocRows(); loadLibrary(); }
+
+/* 启动：先探一次接口；服务端开启口令门时未授权会自动弹出密码输入 */
+(async function boot() {
+  try {
+    const r = await apiFetch('/api/library');
+    if (r.ok) { init(); return; }
+  } catch (e) {
+    if (e.message === '未授权') return;   // 密码门已弹出
+  }
+  showGate();
+})();
 </script>
 </body>
 </html>

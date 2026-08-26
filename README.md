@@ -63,6 +63,21 @@ sudo systemctl enable --now pdf-toc-web
 | `PDF_TOC_LIB_DIR` | `<项目目录>/library` | 材料库持久目录 |
 | `PDF_TOC_JOBS_DIR` | `/tmp/pdf_toc_jobs` | 临时任务目录（2 小时自动清理） |
 | `PDF_TOC_FONT_DIR` | 自动查找 | 宋体/Times New Roman 字体目录，见 fonts/README.md |
+| `PDF_TOC_ACCESS_KEY` | 空（不启用） | 访问口令；设置后所有 API 需 session token，公网开放实例**务必设置** |
+
+## 双实例部署（私用 + 公用）
+
+同一套代码可部署多个互相隔离的实例（独立目录 = 独立材料库）：
+
+```bash
+# 私用实例：只绑 Tailscale/内网 IP，不设口令
+PDF_TOC_BIND_IP=100.x.y.z PDF_TOC_PORT=8788 python3 app.py
+
+# 公用实例：绑 0.0.0.0 + 设置访问口令（公网任何人可访问但需口令）
+PDF_TOC_BIND_IP=0.0.0.0 PDF_TOC_PORT=8789 PDF_TOC_ACCESS_KEY=你的口令 python3 app.py
+```
+
+口令门机制：前端弹窗输口令 → 后端校验后发放 24h session token（内存存储）→ 所有 API 与下载链接需携带 token；无 token 访问一律 401（含下载直链）。
 
 ## 安全说明
 

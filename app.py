@@ -18,6 +18,7 @@ pdf-toc-web — PDF 合并 + 目录页生成器的 Web 服务。
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ import time
 import uuid
 
 import fitz
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Body, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -48,7 +49,26 @@ DOC_EXT = {".docx", ".doc", ".odt", ".rtf"}          # 需 LibreOffice 转换
 ALLOWED_EXT = PDF_EXT | IMG_EXT | DOC_EXT
 SOFFICE_TIMEOUT = 180
 
+# ---- 访问口令门（可选）----
+# 设置环境变量 PDF_TOC_ACCESS_KEY 后启用：/api/auth 用口令换 session token，
+# 所有 /api/* 请求必须带 token。公网开放实例务必设置；私用(Tailscale)实例可不设。
+AUTH_KEY = os.environ.get("PDF_TOC_ACCESS_KEY", "")
+_sessions = {}                    # token -> 过期时间戳
+SESSION_TTL = 24 * 3600           # session 24 小时有效
+
 app = FastAPI(title="PDF 合并 + 目录生成")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if not AUTH_KEY:
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith("/api/") and path != "/api/auth":
+        tok = request.headers.get("x-auth-token") or request.query_params.get("token")
+        if not tok or _sessions.get(tok, 0) < time.time():
+            return JSONResponse({"error": "未授权：需要访问口令"}, status_code=401)
+    return await call_next(request)
 
 
 # ---------------- 通用工具 ----------------
@@ -170,6 +190,22 @@ def index():
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/api/auth")
+async def api_auth(payload: dict = Body(...)):
+    """口令换 session token。未设置 PDF_TOC_ACCESS_KEY 时直接放行。"""
+    if not AUTH_KEY:
+        return {"ok": True, "token": ""}
+    if payload.get("key") != AUTH_KEY:
+        return JSONResponse({"error": "口令错误"}, status_code=401)
+    token = secrets.token_hex(16)
+    _sessions[token] = time.time() + SESSION_TTL
+    # 顺手清理过期 session
+    for t, exp in list(_sessions.items()):
+        if exp < time.time():
+            del _sessions[t]
+    return {"ok": True, "token": token}
 
 
 @app.get("/api/library")
