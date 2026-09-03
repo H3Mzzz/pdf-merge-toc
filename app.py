@@ -175,7 +175,8 @@ def image_to_pdf(src_path, out_pdf):
     scale = min(595.27 / rect.width, 841.89 / rect.height)
     w, h = rect.width * scale, rect.height * scale
     x0, y0 = (595.27 - w) / 2, (841.89 - h) / 2      # 居中，保持原始宽高比
-    page.show_pdf_page(fitz.Rect(x0, y0, x0 + w, y0 + h), img, 0)
+    # 注意：必须用 insert_image——show_pdf_page 只接受 PDF 文档，图片文档会抛 "is no PDF"
+    page.insert_image(fitz.Rect(x0, y0, x0 + w, y0 + h), filename=src_path)
     doc.save(out_pdf)
     doc.close()
     img.close()
